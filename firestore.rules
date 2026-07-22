@@ -31,7 +31,7 @@ function isDistrictAccount() {
 }
 
 function myUserDoc() {
-  return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+  return get(/databases/(default)/documents/users/$(request.auth.uid)).data;
 }
 
 function isSuperAdmin() {
