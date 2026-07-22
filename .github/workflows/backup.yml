@@ -1,0 +1,34 @@
+name: Firestore Backup to Google Drive
+
+# Weekly export of all Firestore data to a JSON snapshot in a private
+# Google Drive folder — protects against accidental data loss/corruption.
+# Firestore itself is already replicated by Google across data centers;
+# this is specifically for human-error scenarios (bad bulk edit, etc).
+#
+# NOTE: GitHub disables scheduled workflows automatically after 60 days
+# of repository inactivity. If backups silently stop, push any commit
+# (or manually re-enable the workflow under the Actions tab).
+
+on:
+  schedule:
+    - cron: "0 8 * * 0"  # Every Sunday at 8:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install firebase-admin googleapis
+
+      - name: Run backup
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DRIVE_BACKUP_FOLDER_ID: ${{ secrets.DRIVE_BACKUP_FOLDER_ID }}
+        run: node scripts/backup-firestore.js

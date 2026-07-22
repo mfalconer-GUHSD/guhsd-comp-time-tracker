@@ -1,10 +1,11 @@
 # Comp Time Tracker — Setup Guide
 
 This build runs entirely on Firebase's **free Spark plan** — no billing
-account, no card on file, anywhere. Notifications (which would otherwise
-need Cloud Functions) run instead via a scheduled **GitHub Actions**
-workflow, which is also free. Most of the Firebase setup is automated by
-`setup.sh`; what's left is a short list of one-time human steps.
+account, no card on file, anywhere. Notifications and backups (which
+would otherwise need Cloud Functions) run instead via scheduled **GitHub
+Actions** workflows, which are also free. Most of the Firebase setup is
+automated by `setup.sh`; what's left is a short list of one-time human
+steps.
 
 ## Progress checklist
 
@@ -12,7 +13,8 @@ workflow, which is also free. Most of the Firebase setup is automated by
 - [ ] Enable Google as a sign-in provider (one toggle, ~10 seconds)
 - [ ] Sign into the app once, then run the superadmin bootstrap script
 - [ ] Create a service account key for GitHub Actions
-- [ ] Set 6 GitHub repo secrets
+- [ ] Set 6 GitHub repo secrets (notifications)
+- [ ] Set up Google Drive backups (2 more secrets)
 - [ ] Verify the school list against HR/IT
 - [ ] Work through the pre-launch test checklist
 
@@ -57,13 +59,17 @@ manually set `isSuperAdmin` to `true`. This is the only place in this
 whole setup where editing Firestore directly is the recommended path,
 since it's a single field on a single document, one time only.
 
+**Once you're a superadmin, use the in-app Admin panel** (button next to
+your name in the top bar) to grant manager roles to other staff — no more
+manual Firestore edits needed for that going forward.
+
 ## 4. Set up notifications (GitHub Actions)
 
 Since there's no Cloud Functions, a scheduled GitHub Actions workflow
 (already in this repo at `.github/workflows/notifications.yml`) checks
-every 15 minutes for new requests and
-sends the emails. It needs a Firebase service account key and your SMTP
-credentials, stored as **GitHub repo secrets** (never committed to code).
+every 15 minutes for new requests and sends the emails. It needs a
+Firebase service account key and your SMTP credentials, stored as
+**GitHub repo secrets** (never committed to code).
 
 ### Create the service account key
 
@@ -89,7 +95,9 @@ gcloud iam service-accounts keys create service-account.json \
 
 Either way: open `service-account.json`, copy its *entire contents*, and
 **delete the local file once it's in GitHub Secrets** (below) — don't
-leave it sitting on disk or commit it anywhere.
+leave it sitting on disk or commit it anywhere. You'll reuse this same
+service account for backups in step 6, so keep the JSON handy for a
+minute before deleting it.
 
 ### Add the GitHub repo secrets
 
@@ -128,7 +136,64 @@ re-enable the workflow manually under the Actions tab.
 The `SCHOOLS` array in `index.html` was compiled from GUHSD's public
 website. Confirm it against HR/IT's authoritative list before go-live.
 
-## 6. What to test before rolling out to real staff
+## 6. Set up weekly backups to Google Drive
+
+Firestore itself is already replicated by Google across multiple data
+centers — that baseline durability needs no setup. This backup is for a
+different risk: protecting against a bad bulk edit, accidental deletion,
+or other human error, by keeping point-in-time JSON snapshots you can
+recover from.
+
+**This deliberately does not go into this GitHub repo or any public
+location** — it contains real employee names, emails, and comp-time
+details, so it goes to a **private Google Drive folder only you (and
+whoever else you choose) can see.**
+
+### One-time setup
+
+1. **Enable the Google Drive API** for your Firebase project: go to
+   https://console.cloud.google.com/apis/library/drive.googleapis.com
+   (make sure the project selector at the top shows your project), and
+   click **Enable**. This is free — no billing account needed.
+
+2. **Create (or choose) a Google Drive folder** to hold backups — e.g.
+   "Comp Time Tracker Backups." Open it in Drive and copy its **folder
+   ID** from the URL: `https://drive.google.com/drive/folders/`**`THIS_PART`**
+
+3. **Share that folder with the service account.** In Drive, right-click
+   the folder → **Share** → enter the service account's email (it looks
+   like `comp-time-notifier@YOUR_PROJECT_ID.iam.gserviceaccount.com` —
+   you can find the exact address in Cloud Console → IAM & Admin →
+   Service Accounts) → give it **Editor** access → Share. This is the
+   *only* thing in your entire Drive this service account can ever touch.
+
+4. **Add one more GitHub repo secret:**
+
+| Secret name | Value |
+|---|---|
+| `DRIVE_BACKUP_FOLDER_ID` | The folder ID from step 2 |
+
+(`FIREBASE_SERVICE_ACCOUNT` is already set from step 4 above — the same
+service account is reused here, now with Drive access added via sharing.)
+
+### Verify it's working
+
+**Actions** tab → **Firestore Backup to Google Drive** → **Run workflow**
+to trigger it manually. Check your Drive folder afterward for a file like
+`comp-time-backup-2026-07-22T...json`.
+
+The workflow keeps the 20 most recent backups and automatically deletes
+older ones, so the folder won't grow indefinitely.
+
+### To restore from a backup
+
+There's no automated restore (deliberately — a bad restore could do more
+damage than the problem it's fixing). If you ever need to recover data,
+download the relevant backup JSON from Drive and manually re-create the
+affected documents in the Firestore console, or ask for help scripting a
+one-time targeted restore for the specific situation.
+
+## 7. What to test before rolling out to real staff
 
 - [ ] Sign in with a `@guhsd.net` account — confirm it works and a
       non-district Google account is rejected (client-side check; the
@@ -152,8 +217,12 @@ website. Confirm it against HR/IT's authoritative list before go-live.
 - [ ] As a manager, edit a pending/approved entry's reason or admin, and
       void an untouched approved entry — confirm the employee's view shows
       "Adjusted"/"Voided" with the note.
-- [ ] Manually trigger the GitHub Actions workflow and confirm you receive
-      a "new request" email.
+- [ ] As a superadmin, use the Admin panel to grant a manager role to a
+      test account and confirm it takes effect immediately.
+- [ ] Manually trigger the GitHub Actions notifications workflow and
+      confirm you receive a "new request" email.
+- [ ] Manually trigger the backup workflow and confirm a file appears in
+      your Drive folder.
 
 ## Known tradeoffs of this no-billing-account architecture
 
@@ -164,3 +233,6 @@ website. Confirm it against HR/IT's authoritative list before go-live.
 - **Notifications land within ~15 minutes, not instantly.**
 - **No one-click approve/deny straight from the email** — the email links
   into the dashboard instead, where a manager approves after logging in.
+- **Backups are point-in-time snapshots, not continuous replication** —
+  weekly means you could lose up to a week of changes in the worst case.
+  Trigger the workflow manually before any risky bulk operation.
