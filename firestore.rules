@@ -66,8 +66,15 @@ service cloud.firestore {
 
     // Each person can read/update their own profile (but not grant
     // themselves manager/superadmin rights — only a superadmin can do that).
+    // Managers can also read (but not write) profiles of people at a
+    // school they manage, needed to populate the "add starting balance"
+    // employee picker.
     match /users/{uid} {
-      allow read: if isDistrictAccount() && (request.auth.uid == uid || isSuperAdmin());
+      allow read: if isDistrictAccount() && (
+        request.auth.uid == uid ||
+        isSuperAdmin() ||
+        isManagerFor(resource.data.school)
+      );
       allow create: if isDistrictAccount() && request.auth.uid == uid &&
         request.resource.data.isManagerFor == [] &&
         request.resource.data.isSuperAdmin == false;
@@ -93,12 +100,21 @@ service cloud.firestore {
         isManagerFor(resource.data.school) ||
         isSuperAdmin()
       );
-      // Employee creates their own; comp-hour math is validated here since
-      // there's no Cloud Function to recompute it authoritatively.
-      allow create: if isDistrictAccount() &&
-        request.resource.data.employeeId == request.auth.uid &&
-        request.resource.data.status == 'pending' &&
-        compHoursMathIsValid(request.resource.data);
+      // Either: an employee creating their own pending entry (comp-hour
+      // math validated since there's no Cloud Function to recompute it
+      // authoritatively) — OR a manager directly crediting an approved
+      // "starting balance" entry on behalf of someone at a school they
+      // manage (the only way a starting balance can be created at all;
+      // employees cannot self-submit one).
+      allow create: if isDistrictAccount() && compHoursMathIsValid(request.resource.data) && (
+        (request.resource.data.employeeId == request.auth.uid &&
+         request.resource.data.status == 'pending' &&
+         request.resource.data.isStartingBalance == false)
+        ||
+        (isManagerFor(request.resource.data.school) &&
+         request.resource.data.status == 'approved' &&
+         request.resource.data.isStartingBalance == true)
+      );
       // Managers (for FIFO drawdown, edits, and void) and superadmins can
       // update — but the core hour math can never change after creation,
       // even via a manager update. Only remainingHours (FIFO drawdown),
