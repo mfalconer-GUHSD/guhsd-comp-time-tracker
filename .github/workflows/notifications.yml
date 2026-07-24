@@ -1,17 +1,24 @@
 name: Comp Time Notifications
 
-# Runs every 15 minutes to send "new request" alerts — this replaces what
-# would otherwise be Cloud Functions triggers, avoiding any requirement
-# for a Google Cloud billing account.
+# PAUSED as of 2026-07: email notifications are not yet working reliably,
+# so the automatic 15-minute schedule is disabled below to avoid running
+# for no purpose. The workflow can still be triggered manually any time
+# via the "Run workflow" button in the Actions tab (workflow_dispatch),
+# e.g. to test a fix. To re-enable the automatic schedule, uncomment the
+# `schedule:` block below.
+#
+# Originally: runs every 15 minutes to send "new request" alerts — this
+# replaces what would otherwise be Cloud Functions triggers, avoiding any
+# requirement for a Google Cloud billing account.
 #
 # NOTE: GitHub disables scheduled workflows automatically after 60 days
-# of repository inactivity. If notifications silently stop, push any
-# commit (or manually re-enable the workflow under the Actions tab) to
-# reset that clock. Worth a calendar reminder every couple of months.
+# of repository inactivity. If/when the schedule is re-enabled and
+# notifications silently stop, push any commit (or manually re-enable
+# the workflow under the Actions tab) to reset that clock.
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
+  # schedule:
+  #   - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 jobs:
