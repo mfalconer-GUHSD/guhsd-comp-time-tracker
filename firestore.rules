@@ -9,6 +9,13 @@ rules_version = '2';
 //   earnedRequests/{id}     -> earned comp-time entries
 //   usedRequests/{id}       -> comp-time usage requests
 //   auditLog/{id}           -> append-only activity log
+//   coverageEvents/{id}     -> events posted by managers needing staff coverage
+//   coverageSignups/{id}    -> employee sign-ups for coverage events
+//                              (status: 'confirmed' or 'released' — a
+//                              released slot stays reserved to the
+//                              original employee, shown to others as
+//                              available to pick up, until someone else
+//                              actually claims it)
 //
 // NOTE ON ARCHITECTURE: this app runs on Firebase's free Spark plan with
 // no Cloud Functions (no billing account). That means there is no trusted
@@ -150,6 +157,45 @@ service cloud.firestore {
         request.resource.data.employeeId == resource.data.employeeId &&
         request.resource.data.totalHours == resource.data.totalHours;
       allow delete: if isSuperAdmin();
+    }
+
+    // Coverage events — posted by a manager for their own school(s), open
+    // for anyone in the district to read/sign up. Only that school's
+    // manager(s) can edit or cancel the event afterward.
+    match /coverageEvents/{id} {
+      allow read: if isDistrictAccount();
+      allow create: if isDistrictAccount() &&
+        isManagerFor(request.resource.data.school) &&
+        request.resource.data.postedByUserId == request.auth.uid &&
+        request.resource.data.slotsNeeded > 0 &&
+        request.resource.data.status == 'open';
+      allow update: if isDistrictAccount() && isManagerFor(resource.data.school);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Coverage sign-ups. Three ways a write can legitimately happen:
+    // (1) an employee signs themselves up fresh, (2) the signed-up
+    // employee toggles their own status between confirmed/released,
+    // (3) a different employee "picks up" a slot that's currently
+    // released, becoming the new confirmed holder. A manager for that
+    // school can also intervene (e.g. to correct a stuck record).
+    match /coverageSignups/{id} {
+      allow read: if isDistrictAccount();
+      allow create: if isDistrictAccount() &&
+        request.resource.data.employeeId == request.auth.uid &&
+        request.resource.data.status == 'confirmed';
+      allow update: if isDistrictAccount() && (
+        (resource.data.employeeId == request.auth.uid &&
+         request.resource.data.employeeId == resource.data.employeeId)
+        ||
+        (resource.data.status == 'released' &&
+         request.resource.data.employeeId == request.auth.uid &&
+         request.resource.data.status == 'confirmed')
+        ||
+        isManagerFor(resource.data.school)
+      );
+      allow delete: if isDistrictAccount() &&
+        (resource.data.employeeId == request.auth.uid || isManagerFor(resource.data.school) || isSuperAdmin());
     }
 
     // Append-only audit trail. Nobody edits or deletes history.
